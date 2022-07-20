@@ -1,0 +1,207 @@
+#!/bin/bash
+# Copyright (c) 2022, holyzone
+# All rights reserved.
+
+op=100  # 0: backup 1: recover 2: install 3: uninstall 100: help
+fpath="."
+while getopts "bridhp:" arg
+do
+    case $arg in
+        b)
+            op=0;;
+        r)
+            op=1;;
+        d)
+            op=2;;
+        i)
+            op=3;;
+        p)  
+            fpath=$OPTARG;;
+        h)
+            op=100;;
+        esac
+done
+
+function print_help()
+{
+    echo -e "\t\tnginx backup&recover tool\nCopyright (c) 2022, holyzone\nAll rights reserved.\n\n"
+    echo -e "\033[1mbackup:\033[0m\n\thznginx -b [-p/path/to/backup_directory]"
+    echo -e "\033[1mrecover:\033[0m\n\thznginx -r -p/path/to/nginxbackupxxx.tar.gz"
+    echo -e "\033[1minstall:\033[0m\n\thznginx -i"
+    echo -e "\033[1muninstall:\033[0m\n\thznginx -u"
+}
+
+function get_conf_from_cpl()
+{
+    declare  -A  conf_arr
+    conf_arr[0]=""  # prefix
+    conf_arr[1]=""  # conf_path
+    conf_arr[2]=""  # sbin_path
+    conf_arr[3]=""  # conf_dir
+
+
+    if [[ -z $1 ]]
+    then
+        echo "need imput compiling string"
+        exit 1
+    fi
+
+    conf_info=$1
+
+    for conf in ${conf_info[@]}
+    do
+        case $conf in
+            --prefix=*)
+                prefix=`echo $conf|cut -d'=' -f 2`
+                conf_arr[0]=$prefix
+                # echo $prefix
+                ;;
+            --conf-path=*)
+                conf_path=`echo $conf|cut -d'=' -f 2`
+                conf_arr[1]=$conf_path
+                conf_arr[3]=${conf_path%/*}
+                # echo $conf_path
+                ;;
+            --sbin-path=*)
+                sbin_path=`echo $conf|cut -d'=' -f 2`
+                conf_arr[2]=$sbin_path
+                # echo $sbin_path
+                ;;
+        esac
+    done 
+
+    echo ${conf_arr[*]}
+}
+
+function gen_back_name()
+{
+    base_back_name="nginxbackup"
+    back_name=$base_back_name
+    while true
+    do
+        if [ -d $fpath/$back_name ]
+        then
+            # find next backup number
+            suff_num=`echo $back_name |cut -d "_" -f 2`
+            next_suff=$(($suff_num+1))
+            back_name=$base_back_name"_"$next_suff
+            continue
+        else
+            break
+        fi
+    done
+
+    echo $back_name
+}
+
+function backup()
+{
+    backup_name=$(gen_back_name)
+
+    backup_path=$fpath/$backup_name
+
+    cpl_info_path=$backup_path/cpl_info
+
+    mkdir -p $backup_path
+    echo `nginx -V 2>&1` > $cpl_info_path
+
+    conf_info=`nginx -V 2>&1|grep "configure arguments:"`
+
+    conf_arr=($(get_conf_from_cpl "$conf_info"))
+
+    conf_dir=${conf_arr[3]}
+    sbin_path=${conf_arr[2]}
+    prefix=${conf_arr[0]}
+
+    prefix_name=${prefix##*/}"_prefix"
+    sbin_name=${sbin_path##*/}"_bin"
+
+    cp -rv $prefix $backup_path/$prefix_name
+
+    cp -rv $sbin_path $backup_path/$sbin_name
+
+    if [[ $conf_dir != $prefix* ]]
+    then
+        conf_name=${conf_dir##*/}"_conf"
+        cp -rv $conf_dir $backup_path/$conf_name
+    fi
+
+    tar -czf $backup_path.tar.gz -C $fpath $backup_name --remove-files
+
+    if [ $? -eq 0 ];then
+        echo -e "\nbackup success!\n--> $backup_path.tar.gz"
+    fi
+}
+
+function recover()
+{
+    if [ ! $fpath ]; then
+        echo "usage: hznginx -r -p/path/to/nginxbackupxxx.tar.gz"
+        exit 1
+    fi
+
+    if [ ! -f $fpath ];then
+        echo "$fpath is not exist!"
+        exit 1
+    fi
+    tar -xf $fpath
+
+    # file like nginxbackup.tar.gz
+    backup_name=`echo ${fpath##*/}|cut -d'.' -f1  `
+
+    conf_info=`cat $backup_name/cpl_info`
+
+    conf_arr=($(get_conf_from_cpl "$conf_info"))
+
+    conf_dir=${conf_arr[3]}
+    sbin_path=${conf_arr[2]}
+    prefix=${conf_arr[0]}
+
+    # get the last-dir or file name
+    prefix_name=${prefix##*/}"_prefix"
+    sbin_name=${sbin_path##*/}"_bin"
+
+    if [[ $conf_dir != $prefix* ]]
+    then
+        conf_name=${conf_dir##*/}"_conf"
+        rm -rvf $conf_dir
+        /bin/cp -rfv $backup_name/$conf_name $conf_dir
+    fi
+    rm -rvf $sbin_path
+    /bin/cp -rfv $backup_name/$sbin_name  $sbin_path
+    rm -rvf $prefix
+    /bin/cp -rfv $backup_name/$prefix_name $prefix
+
+    if [ $? -eq 0 ];then
+        echo "Recover success!"
+    fi
+}
+
+function install()
+{
+   yum install -y nginx
+}
+
+function uninstall()
+{
+   yum remove -y nginx
+}
+
+
+case $op in
+    0)
+        backup
+        ;;
+    1)
+        recover
+        ;;
+    2)
+        install
+        ;;
+    3)
+        uninstall
+        ;;
+    *)
+        print_help
+        ;;
+esac
