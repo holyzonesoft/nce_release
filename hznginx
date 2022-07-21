@@ -79,7 +79,7 @@ function gen_back_name()
     back_name=$base_back_name
     while true
     do
-        if [ -d $fpath/$back_name ]
+        if [ -d $fpath/$back_name ] || [ -f  $fpath/$back_name.tar.gz ]
         then
             # find next backup number
             suff_num=`echo $back_name |cut -d "_" -f 2`
@@ -172,6 +172,8 @@ function recover()
     rm -rvf $prefix
     /bin/cp -rfv $backup_name/$prefix_name $prefix
 
+    rm -rf $backup_name
+    
     if [ $? -eq 0 ];then
         echo "Recover success!"
     fi
